@@ -1,0 +1,26 @@
+{
+	email {$ACME_EMAIL}
+}
+
+(api) {
+	# Preserve the path: the backend expects /api/v1 or /api/health.
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+}
+
+{$PORTAL_DOMAIN} {
+	encode zstd gzip
+	import api
+	handle {
+		reverse_proxy portal:3001
+	}
+}
+
+{$ADMIN_DOMAIN} {
+	encode zstd gzip
+	import api
+	handle {
+		reverse_proxy admin:3000
+	}
+}

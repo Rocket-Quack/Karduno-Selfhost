@@ -1,0 +1,183 @@
+name: karduno-self-hosted
+
+x-app-environment: &app-environment
+  POSTGRES_USER: ${POSTGRES_USER:-karduno}
+  POSTGRES_DB: ${POSTGRES_DB:-karduno}
+  REDIS_URL: redis://redis:6379/0
+  JWT_ACCESS_TTL_MINUTES: ${JWT_ACCESS_TTL_MINUTES:-15}
+  JWT_REFRESH_TTL_DAYS: ${JWT_REFRESH_TTL_DAYS:-30}
+  JWT_REMEMBER_ME_TTL_DAYS: ${JWT_REMEMBER_ME_TTL_DAYS:-90}
+  CORS_ORIGINS: https://${PORTAL_DOMAIN:?Set PORTAL_DOMAIN in .env},https://${ADMIN_DOMAIN:?Set ADMIN_DOMAIN in .env}
+  API_BASE_URL: https://${PORTAL_DOMAIN}/api/v1
+  INSTANCE_NAME: ${INSTANCE_NAME:-Karduno Self-Hosted}
+  API_DOCS: "false"
+  TRUSTED_PROXY_IPS: ${PROXY_IP:-172.30.80.2}/32
+
+services:
+  # Installer-only service; never part of the regular application startup.
+  setup-check:
+    image: ghcr.io/rocket-quack/osspoints/osspoints-api:latest
+    profiles: [setup]
+    init: true
+    network_mode: bridge
+    environment:
+      PORTAL_DOMAIN: ${PORTAL_DOMAIN:?Set PORTAL_DOMAIN in .env}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN:?Set ADMIN_DOMAIN in .env}
+    command: [/venv/bin/python, /run/karduno/check-deployment.py, preflight]
+    ports:
+      - "80:8080"
+      - "443:8443"
+    volumes:
+      - ./scripts/check-deployment.py:/run/karduno/check-deployment.py:ro,z
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-karduno}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_DB: ${POSTGRES_DB:-karduno}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    secrets:
+      - postgres_password
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [app]
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command: [redis-server, --appendonly, "yes", --appendfsync, everysec]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [app]
+
+  api:
+    image: ghcr.io/rocket-quack/osspoints/osspoints-api:latest
+    restart: unless-stopped
+    init: true
+    environment:
+      <<: *app-environment
+      API_WORKERS: ${API_WORKERS:-1}
+      INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL:-}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
+    command: [sh, /run/karduno/start-app.sh, api]
+    volumes: &app-volumes
+      - ./scripts/start-app.sh:/run/karduno/start-app.sh:ro,z
+    secrets: &app-secrets
+      - postgres_password
+      - jwt_secret
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - /venv/bin/python
+        - -c
+        - "import json, urllib.request; r = json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)); assert r['status'] == 'ok', r"
+      interval: 10s
+      timeout: 10s
+      start_period: 120s
+      retries: 12
+    networks: [app]
+
+  worker:
+    image: ghcr.io/rocket-quack/osspoints/osspoints-api:latest
+    restart: unless-stopped
+    init: true
+    environment: *app-environment
+    command: [sh, /run/karduno/start-app.sh, worker]
+    volumes: *app-volumes
+    secrets: *app-secrets
+    depends_on:
+      api:
+        condition: service_healthy
+    stop_grace_period: 60s
+    networks: [app]
+
+  admin:
+    image: ghcr.io/rocket-quack/osspoints/osspoints-admin:latest
+    restart: unless-stopped
+    init: true
+    environment:
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+    healthcheck:
+      test: [CMD, node, -e, "require('http').get('http://127.0.0.1:3000/login', r => { r.resume(); process.exit(r.statusCode < 500 ? 0 : 1); }).on('error', () => process.exit(1));"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 10
+    networks: [app]
+
+  portal:
+    image: ghcr.io/rocket-quack/osspoints/osspoints-portal:latest
+    restart: unless-stopped
+    init: true
+    environment:
+      HOSTNAME: 0.0.0.0
+      PORT: "3001"
+    healthcheck:
+      test: [CMD, node, -e, "require('http').get('http://127.0.0.1:3001/login', r => { r.resume(); process.exit(r.statusCode < 500 ? 0 : 1); }).on('error', () => process.exit(1));"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 10
+    networks: [app]
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      PORTAL_DOMAIN: ${PORTAL_DOMAIN:?Set PORTAL_DOMAIN in .env}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN:?Set ADMIN_DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro,z
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      admin:
+        condition: service_healthy
+      portal:
+        condition: service_healthy
+    networks:
+      app:
+        ipv4_address: ${PROXY_IP:-172.30.80.2}
+
+networks:
+  app:
+    ipam:
+      config:
+        - subnet: ${NETWORK_SUBNET:-172.30.80.0/24}
+          ip_range: ${NETWORK_DYNAMIC_RANGE:-172.30.80.128/25}
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password
+  jwt_secret:
+    file: ./secrets/jwt_secret

@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+backups/
+secrets/
+.easy-install.lock/
+*.dump
+*.sql
+*.rdb
+*.aof
+*.tar
+*.tar.gz
+*.tgz
+.DS_Store
+Thumbs.db
+__pycache__/
+*.py[cod]
