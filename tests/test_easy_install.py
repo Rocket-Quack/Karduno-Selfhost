@@ -163,6 +163,37 @@ class EasyInstallTest(unittest.TestCase):
         result = self.run_installer("--prepare-only", success=False)
         self.assertIn("No .env found", result.stderr)
 
+    def test_bash_wizard_saves_admin_credentials(self):
+        (self.root / ".env").unlink()
+        installer = self.root / "easy-install.sh"
+        # Feed the wizard through a pipe, replacing only its terminal check.
+        installer.write_text(
+            installer.read_text().replace("&& -t 0", "&& -p /dev/stdin"),
+            encoding="utf-8", newline="\n",
+        )
+        password = 'Test-Only-$dollar-\\path-"quoted"-\'single'
+        answers = [
+            "points.karduno.test", "admin.karduno.test", "admin@karduno.test",
+            password, password, "",
+        ]
+        output = subprocess.run(
+            [BASH, installer.as_posix(), "--prepare-only"],
+            input=("\n".join(answers) + "\n").encode("utf-8"), env=self.env,
+            capture_output=True, timeout=60,
+        )
+        output.stdout = output.stdout.decode("utf-8")
+        output.stderr = output.stderr.decode("utf-8")
+        self.assertEqual(output.returncode, 0, output.stdout + output.stderr)
+        resolved = subprocess.run(
+            [DOCKER, "compose", "config", "--environment"], cwd=self.root,
+            env=self.env, text=True, capture_output=True, check=True,
+        )
+        values = dict(line.split("=", 1) for line in resolved.stdout.splitlines() if "=" in line)
+        self.assertEqual(values["INITIAL_ADMIN_EMAIL"], "admin@karduno.test")
+        self.assertEqual(values["INITIAL_ADMIN_PASSWORD"], password)
+        self.assertNotIn(password, output.stdout + output.stderr)
+        self.assertFalse((self.root / ".easy-install.lock").exists())
+
     def test_prepare_only_does_not_start(self):
         self.run_installer()
         values = self.secret_values()

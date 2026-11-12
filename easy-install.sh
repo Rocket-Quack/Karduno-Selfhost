@@ -192,6 +192,7 @@ if [[ ! -e .env ]]; then
     write_env ADMIN_DOMAIN "$admin"
     write_env ACME_EMAIL "$acme_email"
     write_env INITIAL_ADMIN_EMAIL "$admin_email"
+    write_env INITIAL_ADMIN_PASSWORD "$admin_password"
     mv -- "$env_tmp" .env
     env_tmp=''
     new_config=true
