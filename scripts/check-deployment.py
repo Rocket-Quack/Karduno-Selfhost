@@ -83,7 +83,8 @@ def preflight(domains):
             server.server_close()
 
 
-def verify_once(domains):
+def verify_once(domains, frontend_domains=()):
+    frontend_domains = set(frontend_domains)
     for domain in domains:
         for address in addresses(domain):
             status, body = request(domain, address, 443, "/api/health", tls=True)
@@ -93,21 +94,23 @@ def verify_once(domains):
                 raise CheckError(f"{domain}: the API health response is not JSON.") from error
             if status != 200 or not isinstance(health, dict) or any(health.get(key) != "ok" for key in ("status", "db", "redis")):
                 raise CheckError(f"{domain}: API, database, or Redis is not healthy.")
-            status, _body = request(domain, address, 443, "/login", tls=True)
-            if not 200 <= status < 400:
-                raise CheckError(f"{domain}: the frontend returned HTTP {status}.")
+            if domain in frontend_domains:
+                status, _body = request(domain, address, 443, "/login", tls=True)
+                if not 200 <= status < 400:
+                    raise CheckError(f"{domain}: the frontend returned HTTP {status}.")
             status, _body = request(domain, address, 80, "/")
             if status not in (301, 302, 307, 308):
                 raise CheckError(f"{domain}: HTTP does not redirect to HTTPS (HTTP {status}).")
 
 
-def verify(domains, timeout):
+def verify(domains, timeout, frontend_domains=()):
     deadline = time.monotonic() + timeout
     while True:
         try:
-            verify_once(domains)
+            verify_once(domains, frontend_domains)
             for domain in domains:
-                print(f"HTTPS, frontend, HTTP redirect, and API health OK: {domain}", flush=True)
+                label = "frontend, " if domain in frontend_domains else ""
+                print(f"HTTPS, {label}HTTP redirect, and API health OK: {domain}", flush=True)
             return
         except CheckError as error:
             if time.monotonic() >= deadline:
@@ -120,14 +123,30 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=("preflight", "verify"))
     parser.add_argument("--timeout", type=int, default=180)
+    parser.add_argument(
+        "--existing",
+        action="store_true",
+        help="Verify an already-running installation. The stack is left untouched and "
+        "an API-only domain (API_DOMAIN) is checked without a frontend probe.",
+    )
     args = parser.parse_args()
-    domains = [os.environ.get("PORTAL_DOMAIN", ""), os.environ.get("ADMIN_DOMAIN", "")]
-    if not all(domains):
-        raise CheckError("PORTAL_DOMAIN and ADMIN_DOMAIN are required.")
+    portal = os.environ.get("PORTAL_DOMAIN", "")
+    admin = os.environ.get("ADMIN_DOMAIN", "")
+    api = os.environ.get("API_DOMAIN", "")
+    if not (portal and admin and api):
+        raise CheckError("PORTAL_DOMAIN, ADMIN_DOMAIN, and API_DOMAIN are required.")
+    if args.existing:
+        # All three domains must already route to this server before the stack is touched.
+        domains = (portal, admin, api)
+    else:
+        # Fresh install: Caddy is not up yet, so only the domains that will host a
+        # frontend are routed to the probe. The API domain must not resolve here,
+        # because the running stack's Caddy would answer for it.
+        domains = (portal, admin)
     if args.mode == "preflight":
         preflight(domains)
     else:
-        verify(domains, max(0, args.timeout))
+        verify(domains, max(0, args.timeout), frontend_domains=(portal, admin))
 
 
 if __name__ == "__main__":

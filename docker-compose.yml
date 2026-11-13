@@ -8,7 +8,7 @@ x-app-environment: &app-environment
   JWT_REFRESH_TTL_DAYS: ${JWT_REFRESH_TTL_DAYS:-30}
   JWT_REMEMBER_ME_TTL_DAYS: ${JWT_REMEMBER_ME_TTL_DAYS:-90}
   CORS_ORIGINS: https://${PORTAL_DOMAIN:?Set PORTAL_DOMAIN in .env},https://${ADMIN_DOMAIN:?Set ADMIN_DOMAIN in .env}
-  API_BASE_URL: https://${PORTAL_DOMAIN}/api/v1
+  API_BASE_URL: https://${API_DOMAIN:?Set API_DOMAIN in .env}/api/v1
   INSTANCE_NAME: ${INSTANCE_NAME:-Karduno Self-Hosted}
   API_DOCS: "false"
   TRUSTED_PROXY_IPS: ${PROXY_IP:-172.30.80.2}/32
@@ -23,6 +23,7 @@ services:
     environment:
       PORTAL_DOMAIN: ${PORTAL_DOMAIN:?Set PORTAL_DOMAIN in .env}
       ADMIN_DOMAIN: ${ADMIN_DOMAIN:?Set ADMIN_DOMAIN in .env}
+      API_DOMAIN: ${API_DOMAIN:?Set API_DOMAIN in .env}
     command: [/venv/bin/python, /run/karduno/check-deployment.py, preflight]
     ports:
       - "80:8080"
@@ -143,6 +144,7 @@ services:
     environment:
       PORTAL_DOMAIN: ${PORTAL_DOMAIN:?Set PORTAL_DOMAIN in .env}
       ADMIN_DOMAIN: ${ADMIN_DOMAIN:?Set ADMIN_DOMAIN in .env}
+      API_DOMAIN: ${API_DOMAIN:?Set API_DOMAIN in .env}
       ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
     ports:
       - "80:80"

@@ -24,3 +24,9 @@
 		reverse_proxy admin:3000
 	}
 }
+
+# API-only domain: /api/* is proxied, everything else is a 404.
+{$API_DOMAIN} {
+	encode zstd gzip
+	import api
+}

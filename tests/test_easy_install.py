@@ -53,7 +53,7 @@ class EasyInstallTest(unittest.TestCase):
         for key in list(self.env):
             if key.startswith(("COMPOSE_", "POSTGRES_", "JWT_", "INITIAL_ADMIN_")):
                 self.env.pop(key)
-        for key in ("PORTAL_DOMAIN", "ADMIN_DOMAIN", "ACME_EMAIL", "IMAGE_VERSION"):
+        for key in ("PORTAL_DOMAIN", "ADMIN_DOMAIN", "API_DOMAIN", "ACME_EMAIL", "IMAGE_VERSION"):
             self.env.pop(key, None)
         self.env.update(
             PATH=str(binary_dir) + os.pathsep + self.env["PATH"],
@@ -66,6 +66,7 @@ class EasyInstallTest(unittest.TestCase):
         (self.root / ".env").write_text(
             "PORTAL_DOMAIN=points.karduno.test\n"
             "ADMIN_DOMAIN=admin.karduno.test\n"
+            "API_DOMAIN=api.karduno.test\n"
             "ACME_EMAIL=admin@karduno.test\n"
             "INITIAL_ADMIN_EMAIL=admin@karduno.test\n"
             "INITIAL_ADMIN_PASSWORD='Installer-Test-Only-2026!'\n"
@@ -158,6 +159,26 @@ class EasyInstallTest(unittest.TestCase):
         result = self.run_installer("--prepare-only", success=False)
         self.assertIn("different domains", result.stderr)
 
+    def test_api_domain_must_differ_from_portal_and_admin(self):
+        self.write_config("API_DOMAIN=points.karduno.test\n")
+        result = self.run_installer("--prepare-only", success=False)
+        self.assertIn("API domain must differ", result.stderr)
+
+    def test_missing_api_domain_is_rejected(self):
+        env = dict(self.env)
+        env.pop("API_DOMAIN", None)
+        # Remove the line from the .env as well so Compose cannot resolve it.
+        (self.root / ".env").write_text(
+            (self.root / ".env").read_text(encoding="utf-8").replace("API_DOMAIN=api.karduno.test\n", ""),
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [BASH, (self.root / "easy-install.sh").as_posix(), "--non-interactive", "--prepare-only"],
+            env=env, text=True, capture_output=True, timeout=60,
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Set API_DOMAIN", result.stderr)
+
     def test_noninteractive_requires_configuration(self):
         (self.root / ".env").unlink()
         result = self.run_installer("--prepare-only", success=False)
@@ -173,7 +194,7 @@ class EasyInstallTest(unittest.TestCase):
         )
         password = 'Test-Only-$dollar-\\path-"quoted"-\'single'
         answers = [
-            "points.karduno.test", "admin.karduno.test", "admin@karduno.test",
+            "points.karduno.test", "admin.karduno.test", "api.karduno.test", "admin@karduno.test",
             password, password, "",
         ]
         output = subprocess.run(
@@ -345,7 +366,7 @@ try {
         (self.root / ".env").unlink()
         self.admin_password = 'Test-Only-$dollar-\\path-\"quoted\"-\'single'
         answers = [
-            "points.karduno.test", "admin.karduno.test", "admin@karduno.test",
+            "points.karduno.test", "admin.karduno.test", "api.karduno.test", "admin@karduno.test",
             self.admin_password, self.admin_password, "",
         ]
         answer_path = self.root / "answers.json"

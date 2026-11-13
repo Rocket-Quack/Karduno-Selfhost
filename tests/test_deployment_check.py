@@ -77,7 +77,7 @@ class DeploymentCheckTest(unittest.TestCase):
             patch.object(check, "request", return_value=(200, b'{"status":"degraded","db":"ok","redis":"error"}')),
         ):
             with self.assertRaisesRegex(check.CheckError, "not healthy"):
-                check.verify_once(["points.test"])
+                check.verify_once(["points.test"], frontend_domains=("points.test",))
 
     def test_missing_frontend_fails_even_with_healthy_api(self):
         with (
@@ -85,7 +85,7 @@ class DeploymentCheckTest(unittest.TestCase):
             patch.object(check, "request", side_effect=[(200, b'{"status":"ok","db":"ok","redis":"ok"}'), (502, b"bad gateway")]),
         ):
             with self.assertRaisesRegex(check.CheckError, "frontend returned HTTP 502"):
-                check.verify_once(["points.test"])
+                check.verify_once(["points.test"], frontend_domains=("points.test",))
 
     def test_https_readiness_includes_http_redirect(self):
         with (
@@ -93,7 +93,49 @@ class DeploymentCheckTest(unittest.TestCase):
             patch.object(check, "request", side_effect=[(200, b'{"status":"ok","db":"ok","redis":"ok"}'), (200, b"login"), (200, b"wrong redirect")]),
         ):
             with self.assertRaisesRegex(check.CheckError, "does not redirect"):
-                check.verify_once(["points.test"])
+                check.verify_once(["points.test"], frontend_domains=("points.test",))
+
+    def test_api_only_domain_skips_frontend_probe(self):
+        with (
+            patch.object(check, "addresses", return_value=["192.0.2.1"]),
+            patch.object(
+                check,
+                "request",
+                side_effect=[(200, b'{"status":"ok","db":"ok","redis":"ok"}'), (301, b"")],
+            ) as request,
+        ):
+            check.verify_once(["api.test"], frontend_domains=())
+            self.assertEqual(request.call_count, 2)
+            self.assertEqual([call.args[3] for call in request.call_args_list], ["/api/health", "/"])
+
+    def test_main_existing_verifies_all_three_domains(self):
+        env = {"PORTAL_DOMAIN": "p.test", "ADMIN_DOMAIN": "a.test", "API_DOMAIN": "api.test"}
+        with (
+            patch.object(check.sys, "argv", ["check-deployment.py", "verify", "--existing"]),
+            patch.object(check.os, "environ", env),
+            patch.object(check, "verify") as verify,
+        ):
+            check.main()
+            verify.assert_called_once_with(("p.test", "a.test", "api.test"), 180, frontend_domains=("p.test", "a.test"))
+
+    def test_main_fresh_install_skips_api_domain(self):
+        env = {"PORTAL_DOMAIN": "p.test", "ADMIN_DOMAIN": "a.test", "API_DOMAIN": "api.test"}
+        with (
+            patch.object(check.sys, "argv", ["check-deployment.py", "preflight"]),
+            patch.object(check.os, "environ", env),
+            patch.object(check, "preflight") as preflight,
+        ):
+            check.main()
+            preflight.assert_called_once_with(("p.test", "a.test"))
+
+    def test_main_requires_api_domain(self):
+        env = {"PORTAL_DOMAIN": "p.test", "ADMIN_DOMAIN": "a.test"}
+        with (
+            patch.object(check.sys, "argv", ["check-deployment.py", "verify"]),
+            patch.object(check.os, "environ", env),
+        ):
+            with self.assertRaisesRegex(check.CheckError, "API_DOMAIN are required"):
+                check.main()
 
     def test_readiness_retries_transient_certificate_failure(self):
         with (
