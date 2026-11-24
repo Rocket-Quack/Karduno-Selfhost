@@ -108,28 +108,28 @@ class DeploymentCheckTest(unittest.TestCase):
             self.assertEqual(request.call_count, 2)
             self.assertEqual([call.args[3] for call in request.call_args_list], ["/api/health", "/"])
 
-    def test_main_existing_verifies_all_three_domains(self):
-        env = {"PORTAL_DOMAIN": "p.test", "ADMIN_DOMAIN": "a.test", "API_DOMAIN": "api.test"}
+    def test_main_existing_verifies_all_domains(self):
+        env = {"ADMIN_DOMAIN": "a.test", "API_DOMAIN": "api.test"}
         with (
             patch.object(check.sys, "argv", ["check-deployment.py", "verify", "--existing"]),
             patch.object(check.os, "environ", env),
             patch.object(check, "verify") as verify,
         ):
             check.main()
-            verify.assert_called_once_with(("p.test", "a.test", "api.test"), 180, frontend_domains=("p.test", "a.test"))
+            verify.assert_called_once_with(("a.test", "api.test"), 180, frontend_domains=("a.test",))
 
     def test_main_fresh_install_skips_api_domain(self):
-        env = {"PORTAL_DOMAIN": "p.test", "ADMIN_DOMAIN": "a.test", "API_DOMAIN": "api.test"}
+        env = {"ADMIN_DOMAIN": "a.test", "API_DOMAIN": "api.test"}
         with (
             patch.object(check.sys, "argv", ["check-deployment.py", "preflight"]),
             patch.object(check.os, "environ", env),
             patch.object(check, "preflight") as preflight,
         ):
             check.main()
-            preflight.assert_called_once_with(("p.test", "a.test"))
+            preflight.assert_called_once_with(("a.test",))
 
     def test_main_requires_api_domain(self):
-        env = {"PORTAL_DOMAIN": "p.test", "ADMIN_DOMAIN": "a.test"}
+        env = {"ADMIN_DOMAIN": "a.test"}
         with (
             patch.object(check.sys, "argv", ["check-deployment.py", "verify"]),
             patch.object(check.os, "environ", env),

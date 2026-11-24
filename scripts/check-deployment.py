@@ -130,23 +130,22 @@ def main():
         "an API-only domain (API_DOMAIN) is checked without a frontend probe.",
     )
     args = parser.parse_args()
-    portal = os.environ.get("PORTAL_DOMAIN", "")
     admin = os.environ.get("ADMIN_DOMAIN", "")
     api = os.environ.get("API_DOMAIN", "")
-    if not (portal and admin and api):
-        raise CheckError("PORTAL_DOMAIN, ADMIN_DOMAIN, and API_DOMAIN are required.")
+    if not (admin and api):
+        raise CheckError("ADMIN_DOMAIN and API_DOMAIN are required.")
     if args.existing:
-        # All three domains must already route to this server before the stack is touched.
-        domains = (portal, admin, api)
+        # Both domains must already route to this server before the stack is touched.
+        domains = (admin, api)
     else:
-        # Fresh install: Caddy is not up yet, so only the domains that will host a
-        # frontend are routed to the probe. The API domain must not resolve here,
+        # Fresh install: Caddy is not up yet, so only the domain that will host a
+        # frontend is routed to the probe. The API domain must not resolve here,
         # because the running stack's Caddy would answer for it.
-        domains = (portal, admin)
+        domains = (admin,)
     if args.mode == "preflight":
         preflight(domains)
     else:
-        verify(domains, max(0, args.timeout), frontend_domains=(portal, admin))
+        verify(domains, max(0, args.timeout), frontend_domains=(admin,))
 
 
 if __name__ == "__main__":

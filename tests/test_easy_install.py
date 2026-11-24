@@ -53,7 +53,7 @@ class EasyInstallTest(unittest.TestCase):
         for key in list(self.env):
             if key.startswith(("COMPOSE_", "POSTGRES_", "JWT_", "INITIAL_ADMIN_")):
                 self.env.pop(key)
-        for key in ("PORTAL_DOMAIN", "ADMIN_DOMAIN", "API_DOMAIN", "ACME_EMAIL", "IMAGE_VERSION"):
+        for key in ("ADMIN_DOMAIN", "API_DOMAIN", "ACME_EMAIL", "IMAGE_VERSION"):
             self.env.pop(key, None)
         self.env.update(
             PATH=str(binary_dir) + os.pathsep + self.env["PATH"],
@@ -64,7 +64,6 @@ class EasyInstallTest(unittest.TestCase):
 
     def write_config(self, extra=""):
         (self.root / ".env").write_text(
-            "PORTAL_DOMAIN=points.karduno.test\n"
             "ADMIN_DOMAIN=admin.karduno.test\n"
             "API_DOMAIN=api.karduno.test\n"
             "ACME_EMAIL=admin@karduno.test\n"
@@ -120,7 +119,7 @@ class EasyInstallTest(unittest.TestCase):
             self.assertEqual(len(services[name]["secrets"]), 2)
         self.assertEqual(len(services["postgres"]["secrets"]), 1)
         self.assertNotIn("POSTGRES_PASSWORD", services["postgres"]["environment"])
-        for name in ("admin", "portal", "redis", "caddy"):
+        for name in ("admin", "redis", "caddy"):
             self.assertNotIn("secrets", services[name])
 
     def test_application_images_always_use_latest(self):
@@ -130,7 +129,7 @@ class EasyInstallTest(unittest.TestCase):
             env=self.env, text=True, capture_output=True, check=True,
         )
         services = json.loads(result.stdout)["services"]
-        for name in ("api", "worker", "admin", "portal", "setup-check"):
+        for name in ("api", "worker", "admin", "setup-check"):
             self.assertTrue(services[name]["image"].endswith(":latest"))
 
     def test_existing_database_without_secrets_is_not_rekeyed(self):
@@ -154,13 +153,8 @@ class EasyInstallTest(unittest.TestCase):
         self.assertIn("Legacy secrets", result.stderr)
         self.assertFalse((self.root / "secrets").exists())
 
-    def test_same_domains_are_rejected(self):
-        self.write_config("ADMIN_DOMAIN=points.karduno.test\n")
-        result = self.run_installer("--prepare-only", success=False)
-        self.assertIn("different domains", result.stderr)
-
-    def test_api_domain_must_differ_from_portal_and_admin(self):
-        self.write_config("API_DOMAIN=points.karduno.test\n")
+    def test_api_domain_must_differ_from_admin(self):
+        self.write_config("API_DOMAIN=admin.karduno.test\n")
         result = self.run_installer("--prepare-only", success=False)
         self.assertIn("API domain must differ", result.stderr)
 
@@ -194,7 +188,7 @@ class EasyInstallTest(unittest.TestCase):
         )
         password = 'Test-Only-$dollar-\\path-"quoted"-\'single'
         answers = [
-            "points.karduno.test", "admin.karduno.test", "api.karduno.test", "admin@karduno.test",
+            "admin.karduno.test", "api.karduno.test", "admin@karduno.test",
             password, password, "",
         ]
         output = subprocess.run(
@@ -366,7 +360,7 @@ try {
         (self.root / ".env").unlink()
         self.admin_password = 'Test-Only-$dollar-\\path-\"quoted\"-\'single'
         answers = [
-            "points.karduno.test", "admin.karduno.test", "api.karduno.test", "admin@karduno.test",
+            "admin.karduno.test", "api.karduno.test", "admin@karduno.test",
             self.admin_password, self.admin_password, "",
         ]
         answer_path = self.root / "answers.json"

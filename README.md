@@ -25,7 +25,7 @@ This repository deploys Karduno on your own server using **prebuilt container im
 ## Requirements
 
 - Linux (Ubuntu, Debian, Fedora) or Windows 10/11 with Docker Desktop running Linux containers
-- Three different hostnames with A/AAAA records pointing to your server, for example `points.example.com` (customer portal), `admin.points.example.com` (administration/POS), and `api.points.example.com` (API)
+- Two different hostnames with A/AAAA records pointing to your server, for example `admin.points.example.com` (administration/POS) and `api.points.example.com` (API)
 - TCP ports 80 and 443 open and reachable
 - Outbound access to the container registries and the certificate authority
 - Docker with Compose v2 – the installer script can set this up for you
@@ -46,7 +46,7 @@ bash easy-install.sh
 powershell -NoProfile -ExecutionPolicy Bypass -File .\easy-install.ps1
 ```
 
-Run the command inside the cloned repository. The wizard asks only for your three domains and the initial administrator.
+Run the command inside the cloned repository. The wizard asks only for your two domains and the initial administrator.
 
 ## Manual setup (Docker Compose)
 
@@ -77,13 +77,12 @@ On Windows, use the installer script above – it handles secret generation for 
 | Endpoint | Example |
 | --- | --- |
 | Administration | `https://admin.points.example.com` |
-| Customer portal (optional) | `https://points.example.com` |
 | API | `https://api.points.example.com/api/v1` |
 | API health | `https://api.points.example.com/api/health` |
 
-The API is additionally reachable under `/api/v1` on the portal and
-administration domains; the dedicated API domain is the canonical base URL
-used for app integrations, POS webhooks, and links in e-mails.
+The API is additionally reachable under `/api/v1` on the administration
+domain; the dedicated API domain is the canonical base URL used for app
+integrations, POS webhooks, and links in e-mails.
 
 Sign in with the initial administrator, then configure email delivery and test customer registration.
 
@@ -105,7 +104,6 @@ PROXY_IP=172.31.80.2
 | --- | --- | --- |
 | API and worker | `ghcr.io/rocket-quack/osspoints/osspoints-api:latest` | Backend and background jobs |
 | Admin | `ghcr.io/rocket-quack/osspoints/osspoints-admin:latest` | Administration and POS |
-| Portal | `ghcr.io/rocket-quack/osspoints/osspoints-portal:latest` | Customer portal |
 | PostgreSQL | `postgres:16` | Application data |
 | Redis | `redis:7` | Job queue |
 | Caddy | `caddy:2` | Reverse proxy and HTTPS |

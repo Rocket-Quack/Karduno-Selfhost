@@ -15,7 +15,7 @@ if ($Help) {
     Write-Host '  .\easy-install.ps1 -PrepareOnly       Prepare configuration without starting'
     Write-Host '  .\easy-install.ps1 -NonInteractive    Use an existing .env without prompts'
     Write-Host '  .\easy-install.ps1 -SkipDependencies  Do not install missing packages'
-    Write-Host 'Missing Docker Desktop can be installed with WinGet. Default setup checks TCP 80/443 and HTTPS on all three domains.'
+    Write-Host 'Missing Docker Desktop can be installed with WinGet. Default setup checks TCP 80/443 and HTTPS on both domains.'
     return
 }
 if ($env:OS -ne 'Windows_NT') {
@@ -164,16 +164,12 @@ try {
     $newConfig = $false
     if (-not (Test-Path -LiteralPath '.env')) {
         if ($NonInteractive) { throw 'No .env found. Run interactively first, or copy .env.example to .env and fill it in.' }
-        Write-Host 'All three domains must point to this server. TCP ports 80 and 443 must be available.'
-        $portal = Read-Domain 'Customer portal domain'
-        do {
-            $admin = Read-Domain 'Administration domain'
-            if ($portal -ieq $admin) { Write-Host 'Portal and administration require different domains.' }
-        } while ($portal -ieq $admin)
+        Write-Host 'Both domains must point to this server. TCP ports 80 and 443 must be available.'
+        $admin = Read-Domain 'Administration domain'
         do {
             $api = Read-Domain 'API domain (app and POS systems)'
-            if ($api -ieq $portal -or $api -ieq $admin) { Write-Host 'The API domain must differ from the portal and administration domains.' }
-        } while ($api -ieq $portal -or $api -ieq $admin)
+            if ($api -ieq $admin) { Write-Host 'The API domain must differ from the administration domain.' }
+        } while ($api -ieq $admin)
         $adminEmail = Read-Email 'Initial administrator email'
         do {
             $adminPassword = Read-Password 'Administrator password (at least 12 characters)'
@@ -186,7 +182,7 @@ try {
         Copy-Item -LiteralPath '.env.example' -Destination $envTemporary
         Protect-PrivatePath $envTemporary
         $settings = [ordered]@{
-            PORTAL_DOMAIN = $portal; ADMIN_DOMAIN = $admin; API_DOMAIN = $api; ACME_EMAIL = $acmeEmail
+            ADMIN_DOMAIN = $admin; API_DOMAIN = $api; ACME_EMAIL = $acmeEmail
             INITIAL_ADMIN_EMAIL = $adminEmail; INITIAL_ADMIN_PASSWORD = $adminPassword
         }
         foreach ($entry in $settings.GetEnumerator()) { Set-DotenvValue $envTemporary $entry.Key $entry.Value }
@@ -209,11 +205,10 @@ try {
     $configuration = ($json -join "`n") | ConvertFrom-Json
     $app = $configuration.services.api.environment
     $proxy = $configuration.services.caddy.environment
-    $portal = [string]$proxy.PORTAL_DOMAIN; $admin = [string]$proxy.ADMIN_DOMAIN; $api = [string]$proxy.API_DOMAIN
-    if (-not (Test-Domain $portal) -or -not (Test-Domain $admin) -or -not (Test-Domain $api)) { throw 'Enter full DNS names without a protocol, port, or path.' }
-    if ($portal -ieq $admin) { throw 'Portal and administration require different domains.' }
-    if ($api -ieq $portal -or $api -ieq $admin) { throw 'The API domain must differ from the portal and administration domains.' }
-    if ($portal -like '*.example.com' -or $admin -like '*.example.com' -or $api -like '*.example.com') { throw 'Replace the example.com placeholders with your own domains.' }
+    $admin = [string]$proxy.ADMIN_DOMAIN; $api = [string]$proxy.API_DOMAIN
+    if (-not (Test-Domain $admin) -or -not (Test-Domain $api)) { throw 'Enter full DNS names without a protocol, port, or path.' }
+    if ($api -ieq $admin) { throw 'The API domain must differ from the administration domain.' }
+    if ($admin -like '*.example.com' -or $api -like '*.example.com') { throw 'Replace the example.com placeholders with your own domains.' }
     if (-not (Test-Email ([string]$proxy.ACME_EMAIL))) { throw 'ACME_EMAIL is not a valid email address.' }
     $project = [string]$configuration.name
 
@@ -271,7 +266,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the existing installation.' }
     Write-Host 'Preparing domain checks (downloads the API image if needed)...'
     if ($runningServices -contains 'caddy') {
-        Write-Host 'Checking the existing installation through all three domains...'
+        Write-Host 'Checking the existing installation through both domains...'
         & $docker compose run --rm --no-deps -T setup-check /venv/bin/python /run/karduno/check-deployment.py verify --timeout 0 --existing
         if ($LASTEXITCODE -ne 0) { throw 'The existing domain routes failed verification. Existing services were left running.' }
     } else {
@@ -280,18 +275,18 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Domain/port checks failed. Check DNS, TCP 80/443, firewall rules, and conflicting web servers before retrying.' }
     }
     Write-Host 'Downloading application and infrastructure images...'
-    & $docker compose pull postgres redis api worker admin portal caddy
+    & $docker compose pull postgres redis api worker admin caddy
     if ($LASTEXITCODE -ne 0) { throw 'Image download failed. Check registry availability, network access, and supported architecture. Nothing has been stopped.' }
     if ($runningServices -contains 'worker') {
         & $docker compose stop worker
         if ($LASTEXITCODE -ne 0) { throw 'Could not pause the existing worker before database migrations.' }
     }
-    & $docker compose up -d --wait --wait-timeout 300 postgres redis api worker admin portal caddy
+    & $docker compose up -d --wait --wait-timeout 300 postgres redis api worker admin caddy
     if ($LASTEXITCODE -ne 0) { throw 'Startup failed. Check docker compose ps and docker compose logs --tail 100. Existing data and secrets are preserved.' }
     & $docker compose run --rm --no-deps -T setup-check /venv/bin/python /run/karduno/check-deployment.py verify
     if ($LASTEXITCODE -ne 0) { throw 'Containers started, but public-domain HTTPS/readiness checks failed. Check Caddy logs, DNS, and firewall settings. The stack was left running for diagnosis.' }
     Write-Host 'Karduno is running and domain checks passed from this server.'
-    Write-Host "Portal: https://$portal`nAdministration: https://$admin`nAPI: https://$api/api/v1"
+    Write-Host "Administration: https://$admin`nAPI: https://$api/api/v1"
     Write-Host 'Also test browser sign-in and email delivery, and check access from another network.'
 } finally {
     if ($envTemporary -and (Test-Path -LiteralPath $envTemporary)) { Remove-Item -LiteralPath $envTemporary }

@@ -21,7 +21,7 @@ for arg in "$@"; do
                 '  bash easy-install.sh --non-interactive  Use an existing .env without prompts' \
                 '  bash easy-install.sh --skip-dependencies  Do not install missing packages' \
                 'Missing Docker dependencies can be installed on Ubuntu, Debian, and Fedora.' \
-                'Default setup checks TCP 80/443 through all three domains, then verifies HTTPS.'
+                'Default setup checks TCP 80/443 through both domains, then verifies HTTPS.'
             exit 0 ;;
         *) fail "Unknown option: $arg (see --help)" ;;
     esac
@@ -167,17 +167,12 @@ printf '\nKarduno Self-Hosted - Easy Install\n\n'
 new_config=false
 if [[ ! -e .env ]]; then
     [[ "$non_interactive" == false && -t 0 ]] || fail 'No .env found. Run interactively first, or copy .env.example to .env and fill it in.'
-    printf 'All three domains must point to this server. TCP ports 80 and 443 must be available.\n\n'
-    ask_domain 'Customer portal domain'; portal=$REPLY
-    while true; do
-        ask_domain 'Administration domain'; admin=$REPLY
-        [[ "${portal,,}" != "${admin,,}" ]] && break
-        printf 'Portal and administration require different domains.\n'
-    done
+    printf 'Both domains must point to this server. TCP ports 80 and 443 must be available.\n\n'
+    ask_domain 'Administration domain'; admin=$REPLY
     while true; do
         ask_domain 'API domain (app and POS systems)'; api=$REPLY
-        [[ "${api,,}" != "${portal,,}" && "${api,,}" != "${admin,,}" ]] && break
-        printf 'The API domain must differ from the portal and administration domains.\n'
+        [[ "${api,,}" != "${admin,,}" ]] && break
+        printf 'The API domain must differ from the administration domain.\n'
     done
     ask_email 'Initial administrator email'; admin_email=$REPLY
     while true; do
@@ -193,7 +188,6 @@ if [[ ! -e .env ]]; then
     env_tmp=$(mktemp .env.tmp.XXXXXX)
     # Copy the template, retaining its comments and any additional settings.
     tr -d '\r' < .env.example > "$env_tmp"
-    write_env PORTAL_DOMAIN "$portal"
     write_env ADMIN_DOMAIN "$admin"
     write_env API_DOMAIN "$api"
     write_env ACME_EMAIL "$acme_email"
@@ -216,10 +210,9 @@ fi
 
 docker compose config --quiet || fail 'The .env is incomplete or invalid.'
 resolved_environment=$(docker compose config --environment) || fail 'Could not read the Compose settings.'
-portal='' admin='' api='' admin_email='' admin_password='' project=''
+admin='' api='' admin_email='' admin_password='' project=''
 while IFS='=' read -r key value; do
     case "$key" in
-        PORTAL_DOMAIN) portal=$value ;;
         ADMIN_DOMAIN) admin=$value ;;
         API_DOMAIN) api=$value ;;
         ACME_EMAIL) acme_email=$value ;;
@@ -229,10 +222,9 @@ while IFS='=' read -r key value; do
     esac
 done <<< "$resolved_environment"
 unset resolved_environment
-valid_domain "$portal" && valid_domain "$admin" && valid_domain "$api" || fail 'PORTAL_DOMAIN, ADMIN_DOMAIN, and API_DOMAIN must be full DNS names without a protocol, port, or path.'
-[[ "${portal,,}" != "${admin,,}" ]] || fail 'Portal and administration require different domains.'
-[[ "${api,,}" != "${portal,,}" && "${api,,}" != "${admin,,}" ]] || fail 'The API domain must differ from the portal and administration domains.'
-[[ "$portal" != *.example.com && "$admin" != *.example.com && "$api" != *.example.com ]] || fail 'Replace the example.com placeholders with your own domains.'
+valid_domain "$admin" && valid_domain "$api" || fail 'ADMIN_DOMAIN and API_DOMAIN must be full DNS names without a protocol, port, or path.'
+[[ "${api,,}" != "${admin,,}" ]] || fail 'The API domain must differ from the administration domain.'
+[[ "$admin" != *.example.com && "$api" != *.example.com ]] || fail 'Replace the example.com placeholders with your own domains.'
 valid_email "${acme_email:-}" || fail 'ACME_EMAIL is not a valid email address.'
 [[ -n "$project" ]] || fail 'Could not determine the Compose project name.'
 existing_database=''
@@ -287,7 +279,7 @@ fi
 running_services=$(docker compose ps --status running --services) || fail 'Could not inspect the existing installation.'
 printf '\nPreparing domain checks (downloads the API image if needed)...\n'
 if [[ $'\n'"$running_services"$'\n' == *$'\ncaddy\n'* ]]; then
-    printf 'Checking the existing installation through all three domains...\n'
+    printf 'Checking the existing installation through both domains...\n'
     docker compose run --rm --no-deps -T setup-check /venv/bin/python /run/karduno/check-deployment.py verify --timeout 0 --existing \
         || fail 'The existing domain routes failed verification. Existing services were left running.'
 else
@@ -296,14 +288,14 @@ else
         || fail 'Domain/port checks failed. Check DNS, TCP 80/443, firewall rules, and conflicting web servers before retrying.'
 fi
 printf '\nDownloading application and infrastructure images...\n'
-docker compose pull postgres redis api worker admin portal caddy || fail 'Image download failed. Check registry availability, network access, and supported architecture. Nothing has been stopped.'
+docker compose pull postgres redis api worker admin caddy || fail 'Image download failed. Check registry availability, network access, and supported architecture. Nothing has been stopped.'
 if [[ $'\n'"$running_services"$'\n' == *$'\nworker\n'* ]]; then
     docker compose stop worker || fail 'Could not pause the existing worker before database migrations.'
 fi
-docker compose up -d --wait --wait-timeout 300 postgres redis api worker admin portal caddy \
+docker compose up -d --wait --wait-timeout 300 postgres redis api worker admin caddy \
     || fail 'Startup failed. Check docker compose ps and docker compose logs --tail 100. Existing data and secrets are preserved.'
 docker compose run --rm --no-deps -T setup-check /venv/bin/python /run/karduno/check-deployment.py verify \
     || fail 'Containers started, but public-domain HTTPS/readiness checks failed. Check Caddy logs, DNS, and firewall settings. The stack was left running for diagnosis.'
 printf '\nKarduno is running and domain checks passed from this server.\n'
-printf 'Portal: https://%s\nAdministration: https://%s\nAPI: https://%s/api/v1\n' "$portal" "$admin" "$api"
+printf 'Administration: https://%s\nAPI: https://%s/api/v1\n' "$admin" "$api"
 printf 'Also test browser sign-in and email delivery, and check access from another network.\n'
